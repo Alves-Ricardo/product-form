@@ -1,0 +1,102 @@
+name: Add Products to Private Repo
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  add-products:
+    if: contains(github.event.issue.labels.*.name, 'auto-add')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Extract URLs from issue
+        id: extract
+        run: |
+          # Extract all URLs from the issue body
+          URLS=$(echo "${{ github.event.issue.body }}" | grep -oE 'https?://[^\s]+' || echo "")
+          
+          # Save to output
+          echo "urls<<EOF" >> $GITHUB_OUTPUT
+          echo "$URLS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          # Count URLs
+          COUNT=$(echo "$URLS" | wc -l)
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          
+          echo "Found $COUNT URL(s)"
+      
+      - name: Add to private repo
+        if: steps.extract.outputs.count > 0
+        env:
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+        run: |
+          # Split PRIVATE_REPO into owner and repo name
+          OWNER=$(echo "$PRIVATE_REPO" | cut -d'/' -f1)
+          REPO=$(echo "$PRIVATE_REPO" | cut -d'/' -f2)
+          
+          echo "Adding to $OWNER/$REPO"
+          
+          # Get current products.txt content
+          RESPONSE=$(curl -s \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$OWNER/$REPO/contents/products.txt")
+          
+          # Get SHA and content
+          SHA=$(echo "$RESPONSE" | jq -r '.sha')
+          CURRENT_CONTENT=$(echo "$RESPONSE" | jq -r '.content' | base64 -d || echo "")
+          
+          # Append new URLs
+          NEW_CONTENT="${CURRENT_CONTENT}
+${{ steps.extract.outputs.urls }}"
+          
+          # Encode to base64
+          ENCODED_CONTENT=$(echo "$NEW_CONTENT" | base64 -w 0)
+          
+          # Update the file
+          curl -X PUT \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$OWNER/$REPO/contents/products.txt" \
+            -d "{
+              \"message\": \"Add ${{ steps.extract.outputs.count }} product(s) from form\",
+              \"content\": \"$ENCODED_CONTENT\",
+              \"sha\": \"$SHA\"
+            }"
+          
+          echo "✅ Successfully added products!"
+      
+      - name: Comment and close issue
+        if: steps.extract.outputs.count > 0
+        uses: actions/github-script@v6
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Success!** ${{ steps.extract.outputs.count }} product(s) have been added to your private tracker.\n\n🔄 They will be tracked in the next scheduled price check (runs daily).\n\n---\n*This issue was automatically processed and closed.*'
+            });
+            
+            await github.rest.issues.update({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              labels: ['auto-add', 'completed']
+            });
+      
+      - name: Handle error
+        if: steps.extract.outputs.count == 0
+        uses: actions/github-script@v6
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ **Error:** No valid URLs found in this issue.\n\nPlease make sure URLs start with `http://` or `https://`'
+            });
