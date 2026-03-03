@@ -6,7 +6,7 @@ on:
 
 jobs:
   add-products:
-    if: contains(github.event.issue.labels.*.name, 'auto-add')
+    if: contains(github.event.issue.title, 'Add Product')
     runs-on: ubuntu-latest
     
     steps:
