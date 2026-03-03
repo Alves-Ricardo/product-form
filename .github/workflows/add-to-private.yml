@@ -1,0 +1,70 @@
+name: Add Products to Private Repo
+
+on:
+  issues:
+    types: [opened, reopened]
+
+jobs:
+  add-products:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if auto-add issue
+        id: check
+        run: |
+          TITLE="${{ github.event.issue.title }}"
+          if [[ "$TITLE" == *"Add Product"* ]]; then
+            echo "is_auto_add=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_auto_add=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Extract URLs
+        if: steps.check.outputs.is_auto_add == 'true'
+        id: extract
+        run: |
+          BODY="${{ github.event.issue.body }}"
+          URLS=$(echo "$BODY" | grep -oE 'https?://[^\s]+' || echo "")
+          echo "urls<<EOF" >> $GITHUB_OUTPUT
+          echo "$URLS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          if [ -z "$URLS" ]; then
+            COUNT=0
+          else
+            COUNT=$(echo "$URLS" | wc -l)
+          fi
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+      
+      - name: Add to private repo
+        if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count > 0
+        env:
+          TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          REPO: ${{ secrets.PRIVATE_REPO }}
+        run: |
+          OWNER=$(echo "$REPO" | cut -d'/' -f1)
+          REPONAME=$(echo "$REPO" | cut -d'/' -f2)
+          RESPONSE=$(curl -s -H "Authorization: token $TOKEN" "https://api.github.com/repos/$OWNER/$REPONAME/contents/products.txt")
+          SHA=$(echo "$RESPONSE" | jq -r '.sha')
+          CURRENT=$(echo "$RESPONSE" | jq -r '.content' | base64 -d)
+          NEWURLS="${{ steps.extract.outputs.urls }}"
+          COMBINED="${CURRENT}
+          ${NEWURLS}"
+          ENCODED=$(echo "$COMBINED" | base64 -w 0)
+          curl -X PUT -H "Authorization: token $TOKEN" "https://api.github.com/repos/$OWNER/$REPONAME/contents/products.txt" -d '{"message":"Add products","content":"'"$ENCODED"'","sha":"'"$SHA"'"}'
+      
+      - name: Close issue
+        if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count > 0
+        uses: actions/github-script@v6
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Added to tracker!'
+            });
+            await github.rest.issues.update({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed'
+            });
