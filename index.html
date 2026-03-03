@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Add Product to Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            max-width: 500px;
+            width: 100%;
+        }
+        h1 {
+            color: #2d3748;
+            margin-bottom: 10px;
+            font-size: 1.8em;
+            text-align: center;
+        }
+        .subtitle {
+            color: #718096;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 0.95em;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            color: #4a5568;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+        textarea {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+            font-family: inherit;
+            min-height: 100px;
+            resize: vertical;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s, transform 0.1s;
+        }
+        button:hover {
+            background: #5a67d8;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        button:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+        }
+        .message {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 0.95em;
+            display: none;
+        }
+        .message.show {
+            display: block;
+        }
+        .success {
+            background: #c6f6d5;
+            color: #22543d;
+            border-left: 4px solid #48bb78;
+        }
+        .error {
+            background: #fed7d7;
+            color: #742a2a;
+            border-left: 4px solid #e53e3e;
+        }
+        .loading {
+            background: #bee3f8;
+            color: #2c5282;
+            border-left: 4px solid #4299e1;
+        }
+        .help-text {
+            font-size: 0.85em;
+            color: #718096;
+            margin-top: 5px;
+        }
+        .example {
+            background: #f7fafc;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 0.85em;
+            color: #4a5568;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>➕ Add Product</h1>
+        <p class="subtitle">Add new products to your price tracker</p>
+        
+        <form id="addForm">
+            <div class="form-group">
+                <label for="productUrl">Product URL(s) *</label>
+                <textarea 
+                    id="productUrl" 
+                    placeholder="Paste one or more product URLs (one per line)"
+                    required
+                    rows="4"
+                ></textarea>
+                <p class="help-text">💡 You can paste multiple URLs, one per line</p>
+                <div class="example">
+                    <strong>Example:</strong><br>
+                    https://www.example.com/product-1<br>
+                    https://www.example.com/product-2
+                </div>
+            </div>
+            
+            <button type="submit" id="submitBtn">
+                Add to Tracker
+            </button>
+        </form>
+        
+        <div id="message" class="message"></div>
+    </div>
+
+    <script>
+        const form = document.getElementById('addForm');
+        const input = document.getElementById('productUrl');
+        const submitBtn = document.getElementById('submitBtn');
+        const messageEl = document.getElementById('message');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const urls = input.value.trim().split('\n').map(u => u.trim()).filter(u => u);
+            
+            // Clear previous messages
+            messageEl.className = 'message';
+            messageEl.textContent = '';
+            
+            if (urls.length === 0) {
+                showMessage('error', '❌ Please enter at least one URL');
+                return;
+            }
+            
+            // Validate URLs start with http
+            const invalidUrls = urls.filter(url => !url.startsWith('http://') && !url.startsWith('https://'));
+            if (invalidUrls.length > 0) {
+                showMessage('error', '❌ All URLs must start with http:// or https://');
+                return;
+            }
+            
+            // Disable button during submission
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Adding...';
+            showMessage('loading', '⏳ Opening submission form...');
+            
+            try {
+                // Create GitHub issue that will trigger the workflow
+                const productList = urls.map((url, i) => `${i + 1}. ${url}`).join('\n');
+                const issueTitle = urls.length === 1 
+                    ? `Add Product: ${urls[0].split('/').pop()}`
+                    : `Add ${urls.length} Products`;
+                const issueBody = `## New Product(s) to Track\n\n${productList}\n\n---\n*Submitted via form*`;
+                
+                // Auto-detect repo from URL
+                const repoMatch = window.location.hostname.match(/([^.]+)\.github\.io/);
+                const username = repoMatch ? repoMatch[1] : '';
+                const repo = window.location.pathname.split('/')[1] || '';
+                
+                if (!username || !repo) {
+                    throw new Error('Could not detect repository details');
+                }
+                
+                const issueUrl = `https://github.com/${username}/${repo}/issues/new?` +
+                    `title=${encodeURIComponent(issueTitle)}&` +
+                    `body=${encodeURIComponent(issueBody)}&` +
+                    `labels=auto-add`;
+                
+                // Open GitHub issue
+                window.open(issueUrl, '_blank');
+                
+                // Show success message
+                showMessage('success', 
+                    `✅ Opening submission form for ${urls.length} product(s). ` +
+                    `Click "Submit new issue" to complete. ` +
+                    `Products will be automatically added!`);
+                
+                // Clear input after short delay
+                setTimeout(() => {
+                    input.value = '';
+                }, 2000);
+                
+            } catch (error) {
+                showMessage('error', '❌ Something went wrong. Please try again.');
+                console.error(error);
+            } finally {
+                // Re-enable button
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Add to Tracker';
+            }
+        });
+
+        function showMessage(type, text) {
+            messageEl.className = `message ${type} show`;
+            messageEl.textContent = text;
+        }
+
+        // Auto-focus input on load
+        window.addEventListener('load', () => {
+            input.focus();
+        });
+    </script>
+</body>
+</html>
