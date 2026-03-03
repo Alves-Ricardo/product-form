@@ -12,7 +12,7 @@ jobs:
         id: check
         run: |
           TITLE="${{ github.event.issue.title }}"
-          if [[ "$TITLE" == *"Add Product"* ]]; then
+          if [[ "$TITLE" == *"Add"* ]] && [[ "$TITLE" == *"Product"* ]]; then
             echo "is_auto_add=true" >> $GITHUB_OUTPUT
           else
             echo "is_auto_add=false" >> $GITHUB_OUTPUT
