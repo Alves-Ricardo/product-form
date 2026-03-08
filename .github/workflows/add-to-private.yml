@@ -23,7 +23,8 @@ jobs:
         id: extract
         run: |
           BODY="${{ github.event.issue.body }}"
-          URLS=$(echo "$BODY" | grep -oE 'https?://[^\s]+' || echo "")
+          # Extract URLs - improved regex to handle multiline
+          URLS=$(echo "$BODY" | grep -oP 'https://[^\s<>]+' || echo "")
           echo "urls<<EOF" >> $GITHUB_OUTPUT
           echo "$URLS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -33,6 +34,8 @@ jobs:
             COUNT=$(echo "$URLS" | wc -l)
           fi
           echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Found $COUNT URLs:"
+          echo "$URLS"
       
       - name: Add to private repo
         if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count > 0
@@ -42,14 +45,42 @@ jobs:
         run: |
           OWNER=$(echo "$REPO" | cut -d'/' -f1)
           REPONAME=$(echo "$REPO" | cut -d'/' -f2)
+          
+          echo "Getting current products.txt from $OWNER/$REPONAME"
           RESPONSE=$(curl -s -H "Authorization: token $TOKEN" "https://api.github.com/repos/$OWNER/$REPONAME/contents/products.txt")
+          
           SHA=$(echo "$RESPONSE" | jq -r '.sha')
           CURRENT=$(echo "$RESPONSE" | jq -r '.content' | base64 -d)
+          
+          echo "Current file has $(echo "$CURRENT" | wc -l) lines"
+          
           NEWURLS="${{ steps.extract.outputs.urls }}"
-          COMBINED="${CURRENT}
-          ${NEWURLS}"
+          
+          # Add newline if file doesn't end with one
+          if [ -n "$CURRENT" ] && [ "${CURRENT: -1}" != $'\n' ]; then
+            CURRENT="${CURRENT}"$'\n'
+          fi
+          
+          COMBINED="${CURRENT}${NEWURLS}"
           ENCODED=$(echo "$COMBINED" | base64 -w 0)
-          curl -X PUT -H "Authorization: token $TOKEN" "https://api.github.com/repos/$OWNER/$REPONAME/contents/products.txt" -d '{"message":"Add products","content":"'"$ENCODED"'","sha":"'"$SHA"'"}'
+          
+          echo "Updating file..."
+          RESULT=$(curl -X PUT \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$OWNER/$REPONAME/contents/products.txt" \
+            -d "{\"message\":\"Add ${{ steps.extract.outputs.count }} products from form\",\"content\":\"$ENCODED\",\"sha\":\"$SHA\"}")
+          
+          echo "$RESULT"
+          
+          # Check if successful
+          if echo "$RESULT" | jq -e '.content' > /dev/null 2>&1; then
+            echo "✅ Successfully added ${{ steps.extract.outputs.count }} products!"
+          else
+            echo "❌ Failed to update file"
+            echo "$RESULT"
+            exit 1
+          fi
       
       - name: Close issue
         if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count > 0
