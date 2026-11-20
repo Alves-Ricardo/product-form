@@ -11,164 +11,103 @@ permissions:
 jobs:
   add-products:
     runs-on: ubuntu-latest
-
     steps:
-      # Check issue title safely
       - name: Check if auto-add issue
         id: check
         env:
           TITLE: ${{ github.event.issue.title }}
         run: |
-          if [[ "$TITLE" == *"Add"* && "$TITLE" == *"Product"* ]]; then
+          if [[ "$TITLE" == *"Add"* ]] && [[ "$TITLE" == *"Product"* ]]; then
             echo "is_auto_add=true" >> "$GITHUB_OUTPUT"
-            echo "This is an Add Product issue."
           else
             echo "is_auto_add=false" >> "$GITHUB_OUTPUT"
-            echo "Not an Add Product issue."
           fi
 
-      # Extract URLs from issue body
       - name: Extract URLs
         if: steps.check.outputs.is_auto_add == 'true'
         id: extract
         env:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          python3 <<'PY'
-          import os
-          import re
-          import uuid
+          URLS=$(printf '%s\n' "$ISSUE_BODY" | grep -oP 'https://[^\s<>]+' || true)
 
-          body = os.environ.get("ISSUE_BODY", "")
+          echo "urls<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$URLS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
-          urls = re.findall(r'https?://[^\s<>]+', body)
-          urls = [u.rstrip('.,;:!?)\']}"') for u in urls]
-          urls = list(dict.fromkeys(u for u in urls if u))
+          if [ -z "$URLS" ]; then
+            COUNT=0
+          else
+            COUNT=$(echo "$URLS" | wc -l)
+          fi
 
-          delimiter = "URLS_" + uuid.uuid4().hex
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Found $COUNT URLs:"
+          echo "$URLS"
 
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"urls<<{delimiter}\n")
-              f.write("\n".join(urls) + "\n")
-              f.write(f"{delimiter}\n")
-              f.write(f"count={len(urls)}\n")
-
-          print(f"Found {len(urls)} URLs:")
-          for url in urls:
-              print(url)
-          PY
-
-      # Add products to private repository
       - name: Add to private repo
-        if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count != '0'
-        id: update
+        if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count > 0
         env:
           TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           REPO: ${{ secrets.PRIVATE_REPO }}
-          NEW_URLS: ${{ steps.extract.outputs.urls }}
-          COUNT: ${{ steps.extract.outputs.count }}
         run: |
-          python3 <<'PY'
-          import os
-          import re
-          import json
-          import base64
-          import urllib.request
-          import urllib.error
+          OWNER=$(echo "$REPO" | cut -d'/' -f1)
+          REPONAME=$(echo "$REPO" | cut -d'/' -f2)
 
-          token = os.environ.get("TOKEN", "")
-          repo = os.environ.get("REPO", "")
-          new_urls = os.environ.get("NEW_URLS", "").strip()
-          count = os.environ.get("COUNT", "0")
+          echo "Getting current products.txt from $OWNER/$REPONAME"
 
-          if not token:
-              raise ValueError("PRIVATE_REPO_TOKEN is missing")
+          RESPONSE=$(curl -fsS \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$OWNER/$REPONAME/contents/products.txt")
 
-          if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
-              raise ValueError("Invalid PRIVATE_REPO setting. Use owner/repository.")
+          SHA=$(echo "$RESPONSE" | jq -r '.sha')
+          CURRENT=$(echo "$RESPONSE" | jq -r '.content' | base64 -d)
 
-          owner, repo_name = repo.split("/", 1)
+          if [ -z "$SHA" ] || [ "$SHA" = "null" ]; then
+            echo "Could not retrieve products.txt"
+            echo "$RESPONSE"
+            exit 1
+          fi
 
-          api_url = (
-              f"https://api.github.com/repos/"
-              f"{owner}/{repo_name}/contents/products.txt"
-          )
+          echo "Current file has $(echo "$CURRENT" | wc -l) lines"
 
-          headers = {
-              "Authorization": f"Bearer {token}",
-              "Accept": "application/vnd.github+json",
-              "X-GitHub-Api-Version": "2022-11-28",
-              "User-Agent": "Product-Tracker-Workflow"
-          }
+          NEWURLS="${{ steps.extract.outputs.urls }}"
 
-          def request(url, method="GET", payload=None):
-              data = json.dumps(payload).encode() if payload else None
-              req = urllib.request.Request(
-                  url,
-                  data=data,
-                  headers=headers,
-                  method=method
-              )
-              try:
-                  with urllib.request.urlopen(req) as response:
-                      return json.loads(response.read().decode())
-              except urllib.error.HTTPError as e:
-                  details = e.read().decode()
-                  raise RuntimeError(
-                      f"GitHub API error {e.code}: {details}"
-                  )
+          if [ -n "$CURRENT" ] && [ "${CURRENT: -1}" != $'\n' ]; then
+            CURRENT="${CURRENT}"$'\n'
+          fi
 
-          print(f"Getting products.txt from {repo}")
+          COMBINED="${CURRENT}${NEWURLS}"
+          ENCODED=$(printf '%s' "$COMBINED" | base64 -w 0)
 
-          response = request(api_url)
+          echo "Updating file..."
 
-          sha = response["sha"]
-          current = base64.b64decode(
-              response["content"]
-          ).decode("utf-8")
+          RESULT=$(curl -fsS -X PUT \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$OWNER/$REPONAME/contents/products.txt" \
+            -d "{\"message\":\"Add ${{ steps.extract.outputs.count }} products from form\",\"content\":\"$ENCODED\",\"sha\":\"$SHA\"}")
 
-          urls = new_urls.splitlines()
+          echo "$RESULT"
 
-          # Preserve existing contents and newline
-          if current and not current.endswith("\n"):
-              current += "\n"
+          if echo "$RESULT" | jq -e '.content' > /dev/null 2>&1; then
+            echo "Successfully added ${{ steps.extract.outputs.count }} products!"
+          else
+            echo "Failed to update file"
+            exit 1
+          fi
 
-          updated = current + "\n".join(urls)
-
-          if urls:
-              updated += "\n"
-
-          encoded = base64.b64encode(
-              updated.encode("utf-8")
-          ).decode("ascii")
-
-          payload = {
-              "message": f"Add {count} products from tracker form",
-              "content": encoded,
-              "sha": sha
-          }
-
-          print("Updating products.txt...")
-
-          result = request(api_url, "PUT", payload)
-
-          if "content" not in result:
-              raise RuntimeError("GitHub did not confirm the file update.")
-
-          print(f"Successfully added {count} products!")
-          PY
-
-      # Comment and close issue
-      - name: Confirm and close issue
-        if: steps.update.outcome == 'success'
+      - name: Close issue
+        if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count > 0
         uses: actions/github-script@v7
         with:
           script: |
             await github.rest.issues.createComment({
+              issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: '✅ Products successfully added to the private tracker!'
+              body: '✅ Added to tracker!'
             });
 
             await github.rest.issues.update({
