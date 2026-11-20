@@ -1,0 +1,152 @@
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .container {
+        background: white;
+        padding: 40px;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        max-width: 500px;
+        width: 100%;
+    }
+
+    h1 {
+        color: #2d3748;
+        margin-bottom: 10px;
+        font-size: 1.8em;
+        text-align: center;
+    }
+
+    .subtitle {
+        color: #718096;
+        text-align: center;
+        margin-bottom: 30px;
+        font-size: 0.95em;
+    }
+
+    .warning {
+        background: #fffaf0;
+        color: #9c4221;
+        border-left: 4px solid #ed8936;
+        padding: 12px;
+        border-radius: 6px;
+        margin-bottom: 22px;
+        font-size: 0.9em;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    label {
+        display: block;
+        color: #4a5568;
+        font-weight: 600;
+        margin-bottom: 8px;
+        font-size: 0.9em;
+    }
+
+    textarea {
+        width: 100%;
+        padding: 14px;
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        font-size: 16px;
+        transition: border-color 0.3s;
+        font-family: inherit;
+        min-height: 120px;
+        resize: vertical;
+    }
+
+    textarea:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+
+    button {
+        width: 100%;
+        padding: 14px;
+        background: #e53e3e;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.3s, transform 0.1s;
+    }
+
+    button:hover {
+        background: #c53030;
+    }
+
+    button:active {
+        transform: scale(0.98);
+    }
+
+    button:disabled {
+        background: #cbd5e0;
+        cursor: not-allowed;
+    }
+
+    .message {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 8px;
+        font-size: 0.95em;
+        display: none;
+    }
+
+    .message.show {
+        display: block;
+    }
+
+    .success {
+        background: #c6f6d5;
+        color: #22543d;
+        border-left: 4px solid #48bb78;
+    }
+
+    .error {
+        background: #fed7d7;
+        color: #742a2a;
+        border-left: 4px solid #e53e3e;
+    }
+
+    .loading {
+        background: #bee3f8;
+        color: #2c5282;
+        border-left: 4px solid #4299e1;
+    }
+
+    .help-text {
+        font-size: 0.85em;
+        color: #718096;
+        margin-top: 5px;
+    }
+
+    .example {
+        background: #f7fafc;
+        padding: 12px;
+        border-radius: 6px;
+        margin-top: 10px;
+        font-size: 0.85em;
+        color: #4a5568;
+        line-height: 1.7;
+        overflow-wrap: anywhere;
+    }
+</style>
