@@ -1,0 +1,158 @@
+steps:
+  - name: Check if removal issue
+    id: check
+    env:
+      TITLE: ${{ github.event.issue.title }}
+    run: |
+      if [[ "$TITLE" == *"Remove"* && "$TITLE" == *"Product"* ]]; then
+        echo "is_remove=true" >> "$GITHUB_OUTPUT"
+      else
+        echo "is_remove=false" >> "$GITHUB_OUTPUT"
+      fi
+
+  - name: Extract product URLs and remove from private repo
+    if: steps.check.outputs.is_remove == 'true'
+    id: remove
+    env:
+      TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      REPO: ${{ secrets.PRIVATE_REPO }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+    run: |
+      python3 <<'PY'
+      import os
+      import re
+      import json
+      import base64
+      import urllib.request
+      import urllib.error
+
+      token = os.environ["TOKEN"]
+      repo = os.environ["REPO"]
+      body = os.environ.get("ISSUE_BODY", "")
+
+      if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+          raise ValueError("Invalid private repository setting")
+
+      owner, repo_name = repo.split("/", 1)
+
+      # Extract URLs from the issue body.
+      urls = re.findall(r'https?://[^\s<>]+', body)
+      urls = [u.rstrip('.,;:!?)\']}"') for u in urls]
+      urls = list(dict.fromkeys(u for u in urls if u))
+
+      if not urls:
+          raise ValueError("No valid product URLs found in issue")
+
+      print(f"Found {len(urls)} product URL(s) to remove.")
+
+      api_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/products.txt"
+
+      headers = {
+          "Authorization": f"Bearer {token}",
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "GitHub-Product-Removal-Workflow"
+      }
+
+      def api_request(url, method="GET", data=None):
+          request = urllib.request.Request(
+              url,
+              data=data,
+              headers=headers,
+              method=method
+          )
+          with urllib.request.urlopen(request) as response:
+              return json.loads(response.read().decode("utf-8"))
+
+      # Retrieve current products.txt.
+      response = api_request(api_url)
+
+      sha = response["sha"]
+      current_bytes = base64.b64decode(response["content"])
+      current = current_bytes.decode("utf-8")
+
+      lines = current.splitlines()
+      original_count = len(lines)
+
+      # Remove exact matching product URLs only.
+      remaining = []
+      removed = []
+
+      for line in lines:
+          if line.strip() in urls:
+              removed.append(line.strip())
+          else:
+              remaining.append(line)
+
+      if not removed:
+          print("No matching products were found.")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("removed_count=0\n")
+              f.write("not_found_count={}\n".format(len(urls)))
+          raise SystemExit(0)
+
+      # Preserve whether the original file ended with a newline.
+      updated = "\n".join(remaining)
+      if current.endswith("\n") and remaining:
+          updated += "\n"
+
+      encoded = base64.b64encode(
+          updated.encode("utf-8")
+      ).decode("ascii")
+
+      payload = {
+          "message": f"Remove {len(removed)} product(s) from tracker",
+          "content": encoded,
+          "sha": sha
+      }
+
+      # Update private repository.
+      result = api_request(
+          api_url,
+          method="PUT",
+          data=json.dumps(payload).encode("utf-8")
+      )
+
+      if "content" not in result:
+          raise RuntimeError("Failed to update products.txt")
+
+      not_found = len(set(urls) - set(removed))
+
+      with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+          f.write(f"removed_count={len(removed)}\n")
+          f.write(f"not_found_count={not_found}\n")
+
+      print(f"Successfully removed {len(removed)} product(s).")
+      print(f"Products remaining: {len(remaining)}")
+      PY
+
+  - name: Confirm removal and close issue
+    if: steps.check.outputs.is_remove == 'true' && steps.remove.outcome == 'success'
+    uses: actions/github-script@v7
+    env:
+      REMOVED: ${{ steps.remove.outputs.removed_count }}
+      NOT_FOUND: ${{ steps.remove.outputs.not_found_count }}
+    with:
+      script: |
+        const removed = Number(process.env.REMOVED || 0);
+        const notFound = Number(process.env.NOT_FOUND || 0);
+
+        const message =
+          `✅ Product removal completed!\n\n` +
+          `- Products removed: ${removed}\n` +
+          `- Products not found: ${notFound}\n\n` +
+          `The private product tracker has been updated.`;
+
+        await github.rest.issues.createComment({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          issue_number: context.issue.number,
+          body: message
+        });
+
+        await github.rest.issues.update({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          issue_number: context.issue.number,
+          state: 'closed'
+        });
