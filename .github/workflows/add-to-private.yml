@@ -1,101 +1,179 @@
+
 name: Add Products to Private Repo
 
 on:
   issues:
     types: [opened, reopened]
 
+permissions:
+  issues: write
+
 jobs:
   add-products:
     runs-on: ubuntu-latest
+
     steps:
+      # Check issue title safely
       - name: Check if auto-add issue
         id: check
+        env:
+          TITLE: ${{ github.event.issue.title }}
         run: |
-          TITLE="${{ github.event.issue.title }}"
-          if [[ "$TITLE" == *"Add"* ]] && [[ "$TITLE" == *"Product"* ]]; then
-            echo "is_auto_add=true" >> $GITHUB_OUTPUT
+          if [[ "$TITLE" == *"Add"* && "$TITLE" == *"Product"* ]]; then
+            echo "is_auto_add=true" >> "$GITHUB_OUTPUT"
+            echo "This is an Add Product issue."
           else
-            echo "is_auto_add=false" >> $GITHUB_OUTPUT
+            echo "is_auto_add=false" >> "$GITHUB_OUTPUT"
+            echo "Not an Add Product issue."
           fi
-      
+
+      # Extract URLs from issue body
       - name: Extract URLs
         if: steps.check.outputs.is_auto_add == 'true'
         id: extract
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          BODY="${{ github.event.issue.body }}"
-          # Extract URLs - improved regex to handle multiline
-          URLS=$(echo "$BODY" | grep -oP 'https://[^\s<>]+' || echo "")
-          echo "urls<<EOF" >> $GITHUB_OUTPUT
-          echo "$URLS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          if [ -z "$URLS" ]; then
-            COUNT=0
-          else
-            COUNT=$(echo "$URLS" | wc -l)
-          fi
-          echo "count=$COUNT" >> $GITHUB_OUTPUT
-          echo "Found $COUNT URLs:"
-          echo "$URLS"
-      
+          python3 <<'PY'
+          import os
+          import re
+          import uuid
+
+          body = os.environ.get("ISSUE_BODY", "")
+
+          urls = re.findall(r'https?://[^\s<>]+', body)
+          urls = [u.rstrip('.,;:!?)\']}"') for u in urls]
+          urls = list(dict.fromkeys(u for u in urls if u))
+
+          delimiter = "URLS_" + uuid.uuid4().hex
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"urls<<{delimiter}\n")
+              f.write("\n".join(urls) + "\n")
+              f.write(f"{delimiter}\n")
+              f.write(f"count={len(urls)}\n")
+
+          print(f"Found {len(urls)} URLs:")
+          for url in urls:
+              print(url)
+          PY
+
+      # Add products to private repository
       - name: Add to private repo
-        if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count > 0
+        if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count != '0'
+        id: update
         env:
           TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           REPO: ${{ secrets.PRIVATE_REPO }}
+          NEW_URLS: ${{ steps.extract.outputs.urls }}
+          COUNT: ${{ steps.extract.outputs.count }}
         run: |
-          OWNER=$(echo "$REPO" | cut -d'/' -f1)
-          REPONAME=$(echo "$REPO" | cut -d'/' -f2)
-          
-          echo "Getting current products.txt from $OWNER/$REPONAME"
-          RESPONSE=$(curl -s -H "Authorization: token $TOKEN" "https://api.github.com/repos/$OWNER/$REPONAME/contents/products.txt")
-          
-          SHA=$(echo "$RESPONSE" | jq -r '.sha')
-          CURRENT=$(echo "$RESPONSE" | jq -r '.content' | base64 -d)
-          
-          echo "Current file has $(echo "$CURRENT" | wc -l) lines"
-          
-          NEWURLS="${{ steps.extract.outputs.urls }}"
-          
-          # Add newline if file doesn't end with one
-          if [ -n "$CURRENT" ] && [ "${CURRENT: -1}" != $'\n' ]; then
-            CURRENT="${CURRENT}"$'\n'
-          fi
-          
-          COMBINED="${CURRENT}${NEWURLS}"
-          ENCODED=$(echo "$COMBINED" | base64 -w 0)
-          
-          echo "Updating file..."
-          RESULT=$(curl -X PUT \
-            -H "Authorization: token $TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$OWNER/$REPONAME/contents/products.txt" \
-            -d "{\"message\":\"Add ${{ steps.extract.outputs.count }} products from form\",\"content\":\"$ENCODED\",\"sha\":\"$SHA\"}")
-          
-          echo "$RESULT"
-          
-          # Check if successful
-          if echo "$RESULT" | jq -e '.content' > /dev/null 2>&1; then
-            echo "✅ Successfully added ${{ steps.extract.outputs.count }} products!"
-          else
-            echo "❌ Failed to update file"
-            echo "$RESULT"
-            exit 1
-          fi
-      
-      - name: Close issue
-        if: steps.check.outputs.is_auto_add == 'true' && steps.extract.outputs.count > 0
-        uses: actions/github-script@v6
+          python3 <<'PY'
+          import os
+          import re
+          import json
+          import base64
+          import urllib.request
+          import urllib.error
+
+          token = os.environ.get("TOKEN", "")
+          repo = os.environ.get("REPO", "")
+          new_urls = os.environ.get("NEW_URLS", "").strip()
+          count = os.environ.get("COUNT", "0")
+
+          if not token:
+              raise ValueError("PRIVATE_REPO_TOKEN is missing")
+
+          if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+              raise ValueError("Invalid PRIVATE_REPO setting. Use owner/repository.")
+
+          owner, repo_name = repo.split("/", 1)
+
+          api_url = (
+              f"https://api.github.com/repos/"
+              f"{owner}/{repo_name}/contents/products.txt"
+          )
+
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "Product-Tracker-Workflow"
+          }
+
+          def request(url, method="GET", payload=None):
+              data = json.dumps(payload).encode() if payload else None
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  headers=headers,
+                  method=method
+              )
+              try:
+                  with urllib.request.urlopen(req) as response:
+                      return json.loads(response.read().decode())
+              except urllib.error.HTTPError as e:
+                  details = e.read().decode()
+                  raise RuntimeError(
+                      f"GitHub API error {e.code}: {details}"
+                  )
+
+          print(f"Getting products.txt from {repo}")
+
+          response = request(api_url)
+
+          sha = response["sha"]
+          current = base64.b64decode(
+              response["content"]
+          ).decode("utf-8")
+
+          urls = new_urls.splitlines()
+
+          # Preserve existing contents and newline
+          if current and not current.endswith("\n"):
+              current += "\n"
+
+          updated = current + "\n".join(urls)
+
+          if urls:
+              updated += "\n"
+
+          encoded = base64.b64encode(
+              updated.encode("utf-8")
+          ).decode("ascii")
+
+          payload = {
+              "message": f"Add {count} products from tracker form",
+              "content": encoded,
+              "sha": sha
+          }
+
+          print("Updating products.txt...")
+
+          result = request(api_url, "PUT", payload)
+
+          if "content" not in result:
+              raise RuntimeError("GitHub did not confirm the file update.")
+
+          print(f"Successfully added {count} products!")
+          PY
+
+      # Comment and close issue
+      - name: Confirm and close issue
+        if: steps.update.outcome == 'success'
+        uses: actions/github-script@v7
         with:
           script: |
             await github.rest.issues.createComment({
-              issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '✅ Added to tracker!'
+              issue_number: context.issue.number,
+              body: '✅ Products successfully added to the private tracker!'
             });
+
             await github.rest.issues.update({
-              issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
+              issue_number: context.issue.number,
               state: 'closed'
             });
