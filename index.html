@@ -158,4 +158,419 @@ background: #e53e3e;
 }
 
 .remove-button:hover {
-background: #c
+background: #c53030;
+}
+
+button:disabled {
+background: #cbd5e0;
+cursor: not-allowed;
+}
+
+.help-text {
+font-size: 0.85em;
+color: #718096;
+margin-top: 7px;
+}
+
+.example {
+background: #f7fafc;
+padding: 12px;
+border-radius: 6px;
+margin-top: 10px;
+font-size: 0.85em;
+color: #4a5568;
+line-height: 1.7;
+overflow-wrap: anywhere;
+}
+
+.message {
+margin-top: 20px;
+padding: 15px;
+border-radius: 8px;
+font-size: 0.95em;
+white-space: pre-line;
+display: none;
+}
+
+.message.show {
+display: block;
+}
+
+.success {
+background: #c6f6d5;
+color: #22543d;
+border-left: 4px solid #48bb78;
+}
+
+.error {
+background: #fed7d7;
+color: #742a2a;
+border-left: 4px solid #e53e3e;
+}
+
+.loading {
+background: #bee3f8;
+color: #2c5282;
+border-left: 4px solid #4299e1;
+}
+
+.footer {
+text-align: center;
+color: #a0aec0;
+font-size: 0.8em;
+margin-top: 25px;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>📦 Product Tracker</h1>
+<p class="subtitle">Manage your product price tracking list</p>
+
+<div class="navigation">
+    <button
+        type="button"
+        class="nav-button active add"
+        id="addTab"
+        onclick="switchTab('add')">
+        ➕ Add Products
+    </button>
+
+    <button
+        type="button"
+        class="nav-button remove"
+        id="removeTab"
+        onclick="switchTab('remove')">
+        🗑️ Remove Products
+    </button>
+</div>
+
+<!-- ADD PRODUCTS -->
+
+<section id="addSection" class="form-section active">
+
+    <h2 class="section-title">➕ Add Products</h2>
+
+    <p class="section-description">
+        Add new products to your price tracker.
+    </p>
+
+    <form id="addForm">
+
+        <div class="form-group">
+
+            <label for="addUrls">Product URL(s) *</label>
+
+            <textarea
+                id="addUrls"
+                placeholder="Paste one or more product URLs, one per line"
+                required
+                rows="5"></textarea>
+
+            <p class="help-text">
+                💡 You can add multiple products at once.
+            </p>
+
+            <div class="example">
+                <strong>Example:</strong><br>
+                https://www.example.com/product-1<br>
+                https://www.example.com/product-2
+            </div>
+
+        </div>
+
+        <button
+            type="submit"
+            class="submit-button add-button"
+            id="addButton">
+            Add to Tracker
+        </button>
+
+    </form>
+
+    <div id="addMessage" class="message"></div>
+
+</section>
+
+<!-- REMOVE PRODUCTS -->
+
+<section id="removeSection" class="form-section">
+
+    <h2 class="section-title">🗑️ Remove Products</h2>
+
+    <p class="section-description">
+        Remove products from your price tracker.
+    </p>
+
+    <div class="warning">
+        ⚠️ Warning: Submitted products will be removed
+        from your private product list.
+    </div>
+
+    <form id="removeForm">
+
+        <div class="form-group">
+
+            <label for="removeUrls">Product URL(s) *</label>
+
+            <textarea
+                id="removeUrls"
+                placeholder="Paste product URLs, one per line"
+                required
+                rows="5"></textarea>
+
+            <p class="help-text">
+                💡 You can remove multiple products at once.
+            </p>
+
+            <div class="example">
+                <strong>Example:</strong><br>
+                https://www.example.com/product-1<br>
+                https://www.example.com/product-2
+            </div>
+
+        </div>
+
+        <button
+            type="submit"
+            class="submit-button remove-button"
+            id="removeButton">
+            Remove Products
+        </button>
+
+    </form>
+
+    <div id="removeMessage" class="message"></div>
+
+</section>
+
+<div class="footer">
+    Product Price Tracker · Powered by GitHub
+</div>
+
+
+</div>
+
+<script>
+
+// ======================================
+// CONFIGURATION
+// ======================================
+
+// Both forms use the same GitHub Pages repository.
+const GITHUB_USERNAME = 'YOUR_USERNAME';
+const GITHUB_REPOSITORY = 'YOUR_REPOSITORY';
+
+// ======================================
+// NAVIGATION
+// ======================================
+
+function switchTab(tab) {
+
+document.getElementById('addSection')
+.classList.toggle('active', tab === 'add');
+
+document.getElementById('removeSection')
+.classList.toggle('active', tab === 'remove');
+
+document.getElementById('addTab')
+.classList.toggle('active', tab === 'add');
+
+document.getElementById('removeTab')
+.classList.toggle('active', tab === 'remove');
+
+}
+
+// ======================================
+// COMMON FUNCTIONS
+// ======================================
+
+function getUrls(value) {
+
+return [...new Set(
+value.split(/\r?\n/)
+.map(url => url.trim())
+.filter(Boolean)
+)];
+
+}
+
+function validateUrls(urls) {
+
+if (urls.length === 0) {
+throw new Error('Please enter at least one product URL.');
+}
+
+const invalid = urls.filter(url => {
+
+try {
+const parsed = new URL(url);
+
+return !['http:', 'https:'].includes(parsed.protocol);
+
+} catch {
+return true;
+}
+
+});
+
+if (invalid.length > 0) {
+throw new Error('All URLs must be valid HTTP or HTTPS URLs.');
+}
+
+}
+
+function showMessage(element, type, message) {
+
+element.className = `message ${type} show`;
+element.textContent = message;
+
+}
+
+function createIssueUrl(type, urls) {
+
+const isAdd = type === 'add';
+
+const productList = urls
+.map((url, index) => `${index + 1}. ${url}`)
+.join('\n');
+
+const issueTitle = isAdd
+? (urls.length === 1
+? `Add Product: ${urls[0].split('/').pop()}`
+: `Add ${urls.length} Products`)
+: (urls.length === 1
+? `Remove Product: ${new URL(urls[0]).pathname.split('/').filter(Boolean).pop() || 'Product'}`
+: `Remove ${urls.length} Products`);
+
+const issueBody = isAdd
+? `## New Product(s) to Track\n\n${productList}\n\n---\n*Submitted via product tracker form*`
+: `## Products to Remove\n\n${productList}\n\n---\n*Submitted via product tracker form*`;
+
+const url =
+`https://github.com/${GITHUB_USERNAME}/${GITHUB_REPOSITORY}/issues/new?` +
+`title=${encodeURIComponent(issueTitle)}&` +
+`body=${encodeURIComponent(issueBody)}`;
+
+return url;
+
+}
+
+// ======================================
+// SUBMIT PRODUCT REQUEST
+// ======================================
+
+async function submitProducts(type, event) {
+
+event.preventDefault();
+
+const isAdd = type === 'add';
+
+const input = document.getElementById(
+isAdd ? 'addUrls' : 'removeUrls'
+);
+
+const button = document.getElementById(
+isAdd ? 'addButton' : 'removeButton'
+);
+
+const message = document.getElementById(
+isAdd ? 'addMessage' : 'removeMessage'
+);
+
+const originalText = isAdd
+? 'Add to Tracker'
+: 'Remove Products';
+
+try {
+
+const urls = getUrls(input.value);
+
+validateUrls(urls);
+
+if (
+GITHUB_USERNAME === 'YOUR_USERNAME' ||
+GITHUB_REPOSITORY === 'YOUR_REPOSITORY'
+) {
+throw new Error(
+'Please configure your GitHub username and repository in the HTML.'
+);
+}
+
+button.disabled = true;
+button.textContent = 'Preparing...';
+
+showMessage(
+message,
+'loading',
+'⏳ Opening GitHub submission form...'
+);
+
+const issueUrl = createIssueUrl(type, urls);
+
+const issueWindow = window.open(
+issueUrl,
+'_blank'
+);
+
+if (!issueWindow) {
+throw new Error(
+'The GitHub window was blocked. Please allow pop-ups and try again.'
+);
+}
+
+showMessage(
+message,
+'success',
+`✅ Request prepared for ${urls.length} product(s).\n\n` +
+`Please submit the GitHub issue in the new window to complete the request.\n\n` +
+`GitHub Actions will process it automatically.`
+);
+
+input.value = '';
+
+} catch (error) {
+
+showMessage(
+message,
+'error',
+'❌ ' + error.message
+);
+
+console.error(error);
+
+} finally {
+
+button.disabled = false;
+button.textContent = originalText;
+
+}
+
+}
+
+// ======================================
+// FORM EVENTS
+// ======================================
+
+document.getElementById('addForm')
+.addEventListener('submit', event => {
+submitProducts('add', event);
+});
+
+document.getElementById('removeForm')
+.addEventListener('submit', event => {
+submitProducts('remove', event);
+});
+
+window.addEventListener('load', () => {
+document.getElementById('addUrls').focus();
+});
+
+</script>
+
+</body>
+</html>
