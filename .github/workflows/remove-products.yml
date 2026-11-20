@@ -1,10 +1,17 @@
 name: Remove Products from Private Repo
 
-on: issues: types: [opened, reopened]
+'on':
+  issues:
+    types:
+      - opened
+      - reopened
 
-permissions: issues: write
+permissions:
+  issues: write
 
-jobs: remove-products: runs-on: ubuntu-latest
+jobs:
+  remove-products:
+    runs-on: ubuntu-latest
 
 steps:
   - name: Check if removal issue
