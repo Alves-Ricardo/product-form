@@ -3,7 +3,9 @@ name: Remove Products from Private Repo
 
 on:
   issues:
-    types: [opened, reopened]
+    types:
+      - opened
+      - reopened
 
 permissions:
   issues: write
@@ -13,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Check issue title
       - name: Check if removal issue
         id: check
         env:
@@ -21,13 +22,10 @@ jobs:
         run: |
           if [[ "$TITLE" == *"Remove"* && "$TITLE" == *"Product"* ]]; then
             echo "is_remove=true" >> "$GITHUB_OUTPUT"
-            echo "This is a Remove Product issue."
           else
             echo "is_remove=false" >> "$GITHUB_OUTPUT"
-            echo "Not a Remove Product issue."
           fi
 
-      # Remove products from private repository
       - name: Remove products from private repository
         if: steps.check.outputs.is_remove == 'true'
         id: remove
@@ -42,29 +40,28 @@ jobs:
           import json
           import base64
           import urllib.request
-          import urllib.error
 
-          token = os.environ.get("TOKEN", "")
-          repo = os.environ.get("REPO", "")
+          token = os.environ["TOKEN"]
+          repo = os.environ["REPO"]
           body = os.environ.get("ISSUE_BODY", "")
 
           if not token:
               raise ValueError("PRIVATE_REPO_TOKEN is missing")
 
           if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
-              raise ValueError("Invalid PRIVATE_REPO setting.")
+              raise ValueError("Invalid PRIVATE_REPO setting")
 
           owner, repo_name = repo.split("/", 1)
 
-          # Extract URLs
+          # Extract product URLs
           urls = re.findall(r'https?://[^\s<>]+', body)
           urls = [u.rstrip('.,;:!?)\']}"') for u in urls]
           urls = list(dict.fromkeys(u for u in urls if u))
 
           if not urls:
-              raise ValueError("No product URLs found in issue.")
+              raise ValueError("No product URLs found")
 
-          print(f"Found {len(urls)} product URLs.")
+          print(f"Found {len(urls)} product URLs")
 
           api_url = (
               f"https://api.github.com/repos/"
@@ -74,28 +71,19 @@ jobs:
           headers = {
               "Authorization": f"Bearer {token}",
               "Accept": "application/vnd.github+json",
-              "X-GitHub-API-Version": "2022-11-28",
+              "X-GitHub-Api-Version": "2022-11-28",
               "User-Agent": "Product-Removal-Workflow"
           }
 
-          def api_request(url, method="GET", payload=None):
-              data = json.dumps(payload).encode() if payload else None
-
+          def api_request(url, method="GET", data=None):
               request = urllib.request.Request(
                   url,
                   data=data,
                   headers=headers,
                   method=method
               )
-
-              try:
-                  with urllib.request.urlopen(request) as response:
-                      return json.loads(response.read().decode())
-              except urllib.error.HTTPError as e:
-                  details = e.read().decode()
-                  raise RuntimeError(
-                      f"GitHub API error {e.code}: {details}"
-                  )
+              with urllib.request.urlopen(request) as response:
+                  return json.loads(response.read().decode("utf-8"))
 
           # Download current products.txt
           response = api_request(api_url)
@@ -108,10 +96,10 @@ jobs:
 
           lines = current.splitlines()
 
-          # Remove exact matching URLs
           remaining = []
           removed = []
 
+          # Remove exact matching URLs
           for line in lines:
               if line.strip() in urls:
                   removed.append(line.strip())
@@ -120,15 +108,14 @@ jobs:
 
           not_found = len(set(urls) - set(removed))
 
-          print(f"Products removed: {len(removed)}")
+          print(f"Products found: {len(removed)}")
           print(f"Products not found: {not_found}")
 
-          # Export results
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"removed_count={len(removed)}\n")
-              f.write(f"not_found_count={not_found}\n")
-
           if not removed:
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write("removed_count=0\n")
+                  f.write(f"not_found_count={not_found}\n")
+
               print("No matching products found.")
               raise SystemExit(0)
 
@@ -152,18 +139,25 @@ jobs:
           result = api_request(
               api_url,
               method="PUT",
-              payload=payload
+              data=json.dumps(payload).encode("utf-8")
           )
 
           if "content" not in result:
               raise RuntimeError("Failed to update products.txt")
 
+          # Export results
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"removed_count={len(removed)}\n")
+              f.write(f"not_found_count={not_found}\n")
+
           print("Product list successfully updated!")
+          print(f"Removed: {len(removed)}")
+          print(f"Not found: {not_found}")
+          print(f"Remaining: {len(remaining)}")
           PY
 
-      # Confirm removal and close issue
       - name: Confirm removal and close issue
-        if: steps.remove.outcome == 'success'
+        if: steps.check.outputs.is_remove == 'true' && steps.remove.outcome == 'success'
         uses: actions/github-script@v7
         env:
           REMOVED: ${{ steps.remove.outputs.removed_count }}
